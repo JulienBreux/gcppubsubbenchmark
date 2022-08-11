@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tools
+spec: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: tools
+  name: locust-scripts
+  labels:
+    app: locust
+data:
+  locustfile.py: |
+    import time
+    from locust import HttpUser, task
+    class QuickstartUser(HttpUser):
+        @task
+        def hello_world(self):
+            self.client.get("/")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: tools
+  name: locust-master
+  labels:
+    role: master
+    app: locust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      role: master
+      app: locust
+  template:
+    metadata:
+      labels:
+        role: master
+        app: locust
+      namespace: tools
+    spec:
+      tolerations:
+        - key: role
+          operator: Equal
+          value: tools
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-nodepool
+                    operator: In
+                    values:
+                      - tools-pool
+      containers:
+        - image: locustio/locust
+          imagePullPolicy: Always
+          name: master
+          args: ["--master"]
+          volumeMounts:
+            - mountPath: /home/locust
+              name: locust-scripts
+          ports:
+            - containerPort: 5557
+              name: comm
+            - containerPort: 5558
+              name: comm-plus-1
+            - containerPort: 8089
+              name: web-ui
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "250m"
+            limits:
+              memory: "64Mi"
+              cpu: "500m"
+      volumes:
+        - name: locust-scripts
+          configMap:
+            name: locust-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: locust
+    role: master
+  namespace: tools
+  name: locust-master
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5557
+      name: communication
+    - port: 5558
+      name: communication-plus-1
+    - port: 8089
+      targetPort: 8089
+      name: web-ui
+  selector:
+    role: master
+    app: locust
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: tools
+  name: locust-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: locust
+    role: master
+  ports:
+    - protocol: TCP
+      port: 8089
+      targetPort: 8089
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: tools
+  name: locust-worker
+  labels:
+    role: worker
+    app: locust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      role: worker
+      app: locust
+  template:
+    metadata:
+      namespace: tools
+      labels:
+        role: worker
+        app: locust
+    spec:
+      tolerations:
+        - key: role
+          operator: Equal
+          value: tools
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-nodepool
+                    operator: In
+                    values:
+                      - tools-pool
+      containers:
+        - image: locustio/locust
+          name: worker
+          args: ["--worker", "--master-host=locust-master", "--loglevel=DEBUG"]
+          volumeMounts:
+            - mountPath: /home/locust
+              name: locust-scripts
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "600m"
+            limits:
+              memory: "256Mi"
+              cpu: "800m"
+      volumes:
+        - name: locust-scripts
+          configMap:
+            name: locust-scripts

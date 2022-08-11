@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: subscribers
+spec: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: subscribers
+  name: subscriber
+  annotations:
+    iam.gke.io/gcp-service-account: main-service-account@pubsub-benchmark.iam.gserviceaccount.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: subscribers
+  name: subscriber
+  labels:
+    app: subscriber
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: subscriber
+  template:
+    metadata:
+      labels:
+        app: subscriber
+      namespace: subscribers
+    spec:
+      tolerations:
+        - key: role
+          operator: Equal
+          value: subscribers
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-nodepool
+                    operator: In
+                    values:
+                      - subscribers-pool
+      serviceAccount: subscriber
+      containers:
+        - image: europe-west9-docker.pkg.dev/pubsub-benchmark/pubsub-node/pubsub-node:stable
+          imagePullPolicy: Always
+          name: subscriber
+          args: ["node", "index.js", "subscribe"]
+          env:
+            - name: SUBSCRIPTION
+              value: node-subscription
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "250m"
+            limits:
+              memory: "64Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: subscriber
+  namespace: subscribers
+  name: subscriber
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      name: http
+  selector:
+    app: subscriber
