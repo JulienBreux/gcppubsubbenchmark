@@ -63,7 +63,7 @@ const messageHandler = message => {
     const data = buffer ? JSON.parse(buffer.toString()) : null;
 
     const now = Date.now();
-    const duration = (now - data.createdAt) / 1000;
+    const duration = now - data.createdAt;
 
     logger.info(data.createdAt)
     logger.info(`received message`, { createdAt: data.createdAt, receivedAt: now, duration: duration, id: message.id, data: data, attributes: message.attributes });
